@@ -1,0 +1,60 @@
+name: Update APT Repository
+on:
+  workflow_dispatch:
+    inputs:
+      deb_url:
+        description: 'URL to .deb file'
+        required: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download .deb
+        run: |
+          wget -O package.deb "${{ github.event.inputs.deb_url }}"
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | base64 -d | gpg --import
+
+      - name: Add .deb to pool
+        run: |
+          mkdir -p pool/main
+          cp package.deb pool/main/
+
+      - name: Generate Packages index
+        run: |
+          mkdir -p dists/stable/main/binary-amd64
+          dpkg-scanpackages --arch amd64 pool/ > dists/stable/main/binary-amd64/Packages
+          gzip -k -f dists/stable/main/binary-amd64/Packages
+
+      - name: Generate Release file
+        run: |
+          cd dists/stable
+          cat > Release << RELEASE
+          Origin: Alpy Studio
+          Label: Alpy Studio
+          Suite: stable
+          Codename: stable
+          Architectures: amd64
+          Components: main
+          Description: Alpy Studio APT Repository
+          RELEASE
+          apt-ftparchive release . >> Release
+          gpg --armor --detach-sign --output Release.gpg Release
+          gpg --armor --clearsign --output InRelease Release
+
+      - name: Add public key
+        run: |
+          gpg --armor --export ${{ secrets.GPG_KEY_ID }} > alpy-studio.gpg.key
+
+      - name: Commit and push
+        run: |
+          git config user.email "alpystore@outlook.com"
+          git config user.name "Alpy Studio Bot"
+          git add .
+          git commit -m "Update APT repository"
+          git push
